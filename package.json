@@ -1,0 +1,15 @@
+{
+  "name": "expo-autolinking-bug-repro",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "verify": "npx expo-modules-autolinking verify -v",
+    "setup-bug": "node setup-fake-nested.js",
+    "test": "npm run setup-bug && npm run verify"
+  },
+  "dependencies": {
+    "expo": "~52.0.0",
+    "react": "18.3.1",
+    "react-native": "0.76.0"
+  }
+}
