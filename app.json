@@ -1,0 +1,11 @@
+{
+  "expo": {
+    "name": "autolinking-bug-repro",
+    "slug": "autolinking-bug-repro",
+    "version": "1.0.0",
+    "platforms": ["android"],
+    "android": {
+      "package": "com.test.autolinkingbugrepro"
+    }
+  }
+}

@@ -4,75 +4,71 @@
 
 When Gradle Buildship runs during Android builds, it creates `.project` metadata files in nested `node_modules` paths. The autolinking algorithm finds these incomplete folders first (because `Module._nodeModulePaths` returns nested paths before hoisted ones), causing valid hoisted packages to be shadowed and lost.
 
-## Bug Location
+## Error Message
 
-`expo-modules-autolinking/src/dependencies/resolution.ts` - `resolveDependency` function
+```
+unable to resolve class expo.modules.plugin.gradle.ExpoModuleExtension
+ @ line 4, column 1.
+   import expo.modules.plugin.gradle.ExpoModuleExtension
+   ^
 
-The function uses `maybeRealpath` which only checks if a folder exists, not if it contains a valid `package.json`. When the nested incomplete folder exists, it returns that path immediately without checking the hoisted version.
+unable to resolve class expo.modules.plugin.Version
+ @ line 5, column 1.
+   import expo.modules.plugin.Version
+   ^
+```
 
 ## Reproduction
 
 ```bash
-# 1. Install dependencies
+# 1. Clone and install
+git clone https://github.com/kimchi-developer/expo-autolinking-bug-repro
+cd expo-autolinking-bug-repro
 npm install
 
 # 2. Simulate what Gradle Buildship does
 node setup-fake-nested.js
 
-# 3. Run verify to see expo-modules-core is MISSING
+# 3. Verify expo-modules-core is MISSING (9 modules)
 npx expo-modules-autolinking verify -v
+
+# 4. Run Android build to see the error
+npx expo prebuild --platform android --clean
+npx expo run:android
 ```
 
-## Expected vs Actual
+## Verify Output Comparison
 
-**Expected:** `expo-modules-core` should be found at `node_modules/expo-modules-core`
-
-**Actual:** `expo-modules-core` is missing from the verify output because:
-1. `resolveDependency` finds `expo/node_modules/expo-modules-core` first
-2. `maybeRealpath` returns success (folder exists)
-3. Returns this path without checking for `package.json`
-4. Later `recurse()` fails because no `package.json`
-5. Module is lost (no fallback to hoisted version)
-
-## Folder Structure After Gradle Build
-
+**With fake nested folder (BUG):**
 ```
-node_modules/
-├── expo/
-│   └── node_modules/
-│       └── expo-modules-core/     ← Fake (Gradle Buildship)
-│           ├── android/.project
-│           └── expo-module-gradle-plugin/.project
-│           (NO package.json!)
-│
-└── expo-modules-core/              ← Real (npm installed)
-    ├── package.json
-    ├── android/
-    ├── ios/
-    └── ...
+🔎  Found 9 modules in dependencies
+ - expo@55.0.0-canary-20260128-67ce8d5 (at: node_modules/expo)
+ - expo-asset@55.0.3-canary-20260128-67ce8d5 (at: node_modules/expo-asset)
+ ...
+ (expo-modules-core is MISSING!)
+✅ Everything is fine!   ← False positive!
 ```
+
+**Without fake nested folder (CORRECT):**
+```
+🔎  Found 10 modules in dependencies
+ - expo-modules-core@56.0.0-canary-20260128-67ce8d5 (at: node_modules/expo-modules-core)
+ ...
+```
+
+## Root Cause
+
+The fake nested folder created by Gradle Buildship:
+```
+node_modules/expo/node_modules/expo-modules-core/
+├── android/.project          ← Only metadata, NO code!
+└── expo-module-gradle-plugin/.project
+```
+
+`resolveDependency()` in `resolution.ts` finds this folder first (nested paths are searched before hoisted) and returns it because `maybeRealpath()` only checks folder existence, not `package.json` validity.
 
 ## Proposed Fix
 
-Add `package.json` validation in `resolveDependency` before returning:
+PR: https://github.com/expo/expo/pull/42812
 
-```typescript
-const resolveDependency = async (dependencyName) => {
-  for (const nodeModulePath of nodeModulePaths) {
-    const originPath = fastJoin(nodeModulePath, dependencyName);
-    const resolvedPath = await maybeRealpath(originPath);
-    if (resolvedPath != null) {
-      // Validate package.json exists
-      const packageJson = await loadPackageJson(fastJoin(resolvedPath, 'package.json'));
-      if (packageJson == null) {
-        continue;  // Try next path
-      }
-      return { ... };
-    }
-  }
-};
-```
-
-## Related
-
-- PR: https://github.com/expo/expo/pull/42812
+Add `package.json` validation before returning from `resolveDependency()`.
